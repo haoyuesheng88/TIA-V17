@@ -1,0 +1,377 @@
+FUNCTION_BLOCK "FB_BagPulseDustCollector"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 1.0
+   VAR_INPUT
+      Enable : Bool := FALSE;
+      Reset : Bool := FALSE;
+      RunPermit : Bool := TRUE;
+      CleanRequest : Bool := FALSE;
+      DpHigh : Bool := FALSE;
+      DpLow : Bool := FALSE;
+      ContinuousMode : Bool := FALSE;
+      BagCount : Int := 4;
+      PulseTime : Time := T#200MS;
+      ValveInterval : Time := T#5S;
+      CyclePause : Time := T#30M;
+      ManualPulse : Bool := FALSE;
+      ManualBag : Int := 1;
+      UseBagEnable : Bool := FALSE;
+      BagEnable : Array[1..16] of Bool;
+      UseIndividualPulseTime : Bool := FALSE;
+      BagPulseTime : Array[1..16] of Time;
+   END_VAR
+
+   VAR_OUTPUT
+      PulseValve : Array[1..16] of Bool;
+      Running : Bool;
+      AutoRunning : Bool;
+      CurrentBag : Int;
+      CycleDone : Bool;
+      Busy : Bool;
+      Alarm : Bool;
+      AlarmCode : Int;
+      StepNo : Int;
+   END_VAR
+
+   VAR
+      Step : Int := 0;
+      BagIndex : Int := 1;
+      ManualBagLatched : Int := 1;
+      AutoRequestLatched : Bool := FALSE;
+      ManualPulseOld : Bool := FALSE;
+      PulseTimer : TON;
+      IntervalTimer : TON;
+      PauseTimer : TON;
+   END_VAR
+
+   VAR_TEMP
+      i : Int;
+      SafeBagCount : Int;
+      EnabledCount : Int;
+      PulsePT : Time;
+      IntervalPT : Time;
+      PausePT : Time;
+      ActivePulsePT : Time;
+      ManualEdge : Bool;
+      FoundBag : Bool;
+      TimeWasDefaulted : Bool;
+      BagCountWasClamped : Bool;
+      ManualBagValid : Bool;
+      ManualBagEnabled : Bool;
+   END_VAR
+
+BEGIN
+   FOR #i := 1 TO 16 DO
+      #PulseValve[#i] := FALSE;
+   END_FOR;
+
+   #CycleDone := FALSE;
+   #Alarm := FALSE;
+   #AlarmCode := 0;
+   #BagCountWasClamped := FALSE;
+   #TimeWasDefaulted := FALSE;
+
+   #SafeBagCount := #BagCount;
+   IF #SafeBagCount < 1 THEN
+      #SafeBagCount := 1;
+      #BagCountWasClamped := TRUE;
+   ELSIF #SafeBagCount > 16 THEN
+      #SafeBagCount := 16;
+      #BagCountWasClamped := TRUE;
+   END_IF;
+
+   #PulsePT := #PulseTime;
+   IF #PulsePT <= T#0MS THEN
+      #PulsePT := T#200MS;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   #IntervalPT := #ValveInterval;
+   IF #IntervalPT <= T#0MS THEN
+      #IntervalPT := T#5S;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   #PausePT := #CyclePause;
+   IF #PausePT <= T#0MS THEN
+      #PausePT := T#30M;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   #EnabledCount := 0;
+   FOR #i := 1 TO #SafeBagCount DO
+      IF (NOT #UseBagEnable) OR #BagEnable[#i] THEN
+         #EnabledCount := #EnabledCount + 1;
+      END_IF;
+   END_FOR;
+
+   #ManualEdge := #ManualPulse AND NOT #ManualPulseOld;
+   #ManualPulseOld := #ManualPulse;
+
+   IF #CleanRequest OR #DpHigh OR #ContinuousMode THEN
+      #AutoRequestLatched := TRUE;
+   END_IF;
+
+   IF #DpLow AND NOT #CleanRequest AND NOT #DpHigh AND NOT #ContinuousMode THEN
+      #AutoRequestLatched := FALSE;
+   END_IF;
+
+   IF (NOT #Enable) OR #Reset THEN
+      #Step := 0;
+      #BagIndex := 1;
+      #ManualBagLatched := 1;
+      #AutoRequestLatched := FALSE;
+   END_IF;
+
+   #ActivePulsePT := #PulsePT;
+   IF (#Step = 10) AND #UseIndividualPulseTime THEN
+      IF (#BagIndex >= 1) AND (#BagIndex <= 16) THEN
+         IF #BagPulseTime[#BagIndex] > T#0MS THEN
+            #ActivePulsePT := #BagPulseTime[#BagIndex];
+         END_IF;
+      END_IF;
+   ELSIF (#Step = 40) AND #UseIndividualPulseTime THEN
+      IF (#ManualBagLatched >= 1) AND (#ManualBagLatched <= 16) THEN
+         IF #BagPulseTime[#ManualBagLatched] > T#0MS THEN
+            #ActivePulsePT := #BagPulseTime[#ManualBagLatched];
+         END_IF;
+      END_IF;
+   END_IF;
+
+   #PulseTimer(IN := ((#Step = 10) OR (#Step = 40)), PT := #ActivePulsePT);
+   #IntervalTimer(IN := (#Step = 20), PT := #IntervalPT);
+   #PauseTimer(IN := (#Step = 30), PT := #PausePT);
+
+   IF #BagCountWasClamped THEN
+      #Alarm := TRUE;
+      #AlarmCode := 1;
+   END_IF;
+
+   IF #TimeWasDefaulted THEN
+      #Alarm := TRUE;
+      #AlarmCode := 2;
+   END_IF;
+
+   IF #EnabledCount = 0 THEN
+      #Alarm := TRUE;
+      #AlarmCode := 3;
+   END_IF;
+
+   IF #Enable THEN
+      CASE #Step OF
+         0:
+            #ManualBagValid := (#ManualBag >= 1) AND (#ManualBag <= #SafeBagCount);
+            #ManualBagEnabled := #ManualBagValid AND ((NOT #UseBagEnable) OR #BagEnable[#ManualBag]);
+
+            IF #ManualEdge THEN
+               IF #ManualBagEnabled THEN
+                  #ManualBagLatched := #ManualBag;
+                  #Step := 40;
+               ELSE
+                  #Alarm := TRUE;
+                  #AlarmCode := 4;
+               END_IF;
+            ELSIF #RunPermit AND #AutoRequestLatched AND (#EnabledCount > 0) THEN
+               #BagIndex := 1;
+               #Step := 5;
+            END_IF;
+
+         5:
+            #FoundBag := FALSE;
+
+            FOR #i := #BagIndex TO #SafeBagCount DO
+               IF (NOT #UseBagEnable) OR #BagEnable[#i] THEN
+                  #BagIndex := #i;
+                  #FoundBag := TRUE;
+                  EXIT;
+               END_IF;
+            END_FOR;
+
+            IF #FoundBag THEN
+               #Step := 10;
+            ELSE
+               #CycleDone := TRUE;
+               #AutoRequestLatched := FALSE;
+
+               IF #RunPermit AND (#ContinuousMode OR (#DpHigh AND NOT #DpLow)) THEN
+                  #Step := 30;
+               ELSE
+                  #Step := 0;
+                  #BagIndex := 1;
+               END_IF;
+            END_IF;
+
+         10:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #PulseTimer.Q THEN
+               #BagIndex := #BagIndex + 1;
+
+               IF #BagIndex > #SafeBagCount THEN
+                  #CycleDone := TRUE;
+                  #AutoRequestLatched := FALSE;
+
+                  IF #ContinuousMode OR (#DpHigh AND NOT #DpLow) THEN
+                     #Step := 30;
+                  ELSE
+                     #Step := 0;
+                     #BagIndex := 1;
+                  END_IF;
+               ELSE
+                  #Step := 20;
+               END_IF;
+            END_IF;
+
+         20:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #IntervalTimer.Q THEN
+               #Step := 5;
+            END_IF;
+
+         30:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #PauseTimer.Q THEN
+               IF #ContinuousMode OR (#DpHigh AND NOT #DpLow) OR #CleanRequest THEN
+                  #BagIndex := 1;
+                  #Step := 5;
+               ELSE
+                  #Step := 0;
+                  #BagIndex := 1;
+               END_IF;
+            END_IF;
+
+         40:
+            IF #PulseTimer.Q THEN
+               #Step := 0;
+            END_IF;
+
+         ELSE
+            #Step := 0;
+            #BagIndex := 1;
+      END_CASE;
+   END_IF;
+
+   IF #Enable THEN
+      IF (#Step = 10) AND (#BagIndex >= 1) AND (#BagIndex <= #SafeBagCount) THEN
+         IF (NOT #UseBagEnable) OR #BagEnable[#BagIndex] THEN
+            #PulseValve[#BagIndex] := TRUE;
+         END_IF;
+      ELSIF (#Step = 40) AND (#ManualBagLatched >= 1) AND (#ManualBagLatched <= #SafeBagCount) THEN
+         IF (NOT #UseBagEnable) OR #BagEnable[#ManualBagLatched] THEN
+            #PulseValve[#ManualBagLatched] := TRUE;
+         END_IF;
+      END_IF;
+   END_IF;
+
+   #Running := (#Step <> 0);
+   #AutoRunning := (#Step = 5) OR (#Step = 10) OR (#Step = 20) OR (#Step = 30);
+   #Busy := #Running OR #AutoRequestLatched;
+   #CurrentBag := #BagIndex;
+   #StepNo := #Step;
+END_FUNCTION_BLOCK
+
+DATA_BLOCK "DB_BagPulseDustCollector"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 1.0
+   "FB_BagPulseDustCollector"
+BEGIN
+END_DATA_BLOCK
+
+DATA_BLOCK "DB_BagPulseDustCollector_IO"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 1.0
+   VAR
+      Enable : Bool := FALSE;
+      Reset : Bool := FALSE;
+      RunPermit : Bool := TRUE;
+      CleanRequest : Bool := FALSE;
+      DpHigh : Bool := FALSE;
+      DpLow : Bool := FALSE;
+      ContinuousMode : Bool := FALSE;
+      BagCount : Int := 4;
+      PulseTime : Time := T#200MS;
+      ValveInterval : Time := T#5S;
+      CyclePause : Time := T#30M;
+      ManualPulse : Bool := FALSE;
+      ManualBag : Int := 1;
+      PulseValve_1 : Bool := FALSE;
+      PulseValve_2 : Bool := FALSE;
+      PulseValve_3 : Bool := FALSE;
+      PulseValve_4 : Bool := FALSE;
+      Running : Bool := FALSE;
+      AutoRunning : Bool := FALSE;
+      CurrentBag : Int := 0;
+      CycleDone : Bool := FALSE;
+      Busy : Bool := FALSE;
+      Alarm : Bool := FALSE;
+      AlarmCode : Int := 0;
+      StepNo : Int := 0;
+   END_VAR
+BEGIN
+END_DATA_BLOCK
+
+FUNCTION "FC_BagPulseDustCollector_IO" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 1.0
+BEGIN
+   "DB_BagPulseDustCollector_IO".Enable := "DC_Enable";
+   "DB_BagPulseDustCollector_IO".Reset := "DC_Reset";
+   "DB_BagPulseDustCollector_IO".RunPermit := "DC_RunPermit";
+   "DB_BagPulseDustCollector_IO".CleanRequest := "DC_CleanRequest";
+   "DB_BagPulseDustCollector_IO".DpHigh := "DC_DpHigh";
+   "DB_BagPulseDustCollector_IO".DpLow := "DC_DpLow";
+   "DB_BagPulseDustCollector_IO".ContinuousMode := "DC_ContinuousMode";
+   "DB_BagPulseDustCollector_IO".ManualPulse := "DC_ManualPulse";
+
+   "DB_BagPulseDustCollector"(
+      Enable := "DB_BagPulseDustCollector_IO".Enable,
+      Reset := "DB_BagPulseDustCollector_IO".Reset,
+      RunPermit := "DB_BagPulseDustCollector_IO".RunPermit,
+      CleanRequest := "DB_BagPulseDustCollector_IO".CleanRequest,
+      DpHigh := "DB_BagPulseDustCollector_IO".DpHigh,
+      DpLow := "DB_BagPulseDustCollector_IO".DpLow,
+      ContinuousMode := "DB_BagPulseDustCollector_IO".ContinuousMode,
+      BagCount := "DB_BagPulseDustCollector_IO".BagCount,
+      PulseTime := "DB_BagPulseDustCollector_IO".PulseTime,
+      ValveInterval := "DB_BagPulseDustCollector_IO".ValveInterval,
+      CyclePause := "DB_BagPulseDustCollector_IO".CyclePause,
+      ManualPulse := "DB_BagPulseDustCollector_IO".ManualPulse,
+      ManualBag := "DB_BagPulseDustCollector_IO".ManualBag,
+      UseBagEnable := FALSE,
+      UseIndividualPulseTime := FALSE);
+
+   "DC_PulseValve_1" := "DB_BagPulseDustCollector".PulseValve[1];
+   "DC_PulseValve_2" := "DB_BagPulseDustCollector".PulseValve[2];
+   "DC_PulseValve_3" := "DB_BagPulseDustCollector".PulseValve[3];
+   "DC_PulseValve_4" := "DB_BagPulseDustCollector".PulseValve[4];
+
+   "DB_BagPulseDustCollector_IO".PulseValve_1 := "DB_BagPulseDustCollector".PulseValve[1];
+   "DB_BagPulseDustCollector_IO".PulseValve_2 := "DB_BagPulseDustCollector".PulseValve[2];
+   "DB_BagPulseDustCollector_IO".PulseValve_3 := "DB_BagPulseDustCollector".PulseValve[3];
+   "DB_BagPulseDustCollector_IO".PulseValve_4 := "DB_BagPulseDustCollector".PulseValve[4];
+   "DB_BagPulseDustCollector_IO".Running := "DB_BagPulseDustCollector".Running;
+   "DB_BagPulseDustCollector_IO".AutoRunning := "DB_BagPulseDustCollector".AutoRunning;
+   "DB_BagPulseDustCollector_IO".CurrentBag := "DB_BagPulseDustCollector".CurrentBag;
+   "DB_BagPulseDustCollector_IO".CycleDone := "DB_BagPulseDustCollector".CycleDone;
+   "DB_BagPulseDustCollector_IO".Busy := "DB_BagPulseDustCollector".Busy;
+   "DB_BagPulseDustCollector_IO".Alarm := "DB_BagPulseDustCollector".Alarm;
+   "DB_BagPulseDustCollector_IO".AlarmCode := "DB_BagPulseDustCollector".AlarmCode;
+   "DB_BagPulseDustCollector_IO".StepNo := "DB_BagPulseDustCollector".StepNo;
+
+   "DC_Running" := "DB_BagPulseDustCollector".Running;
+   "DC_AutoRunning" := "DB_BagPulseDustCollector".AutoRunning;
+   "DC_CycleDone" := "DB_BagPulseDustCollector".CycleDone;
+   "DC_Busy" := "DB_BagPulseDustCollector".Busy;
+   "DC_Alarm" := "DB_BagPulseDustCollector".Alarm;
+   "DC_CurrentBag" := "DB_BagPulseDustCollector".CurrentBag;
+   "DC_AlarmCode" := "DB_BagPulseDustCollector".AlarmCode;
+   "DC_StepNo" := "DB_BagPulseDustCollector".StepNo;
+END_FUNCTION
