@@ -1,0 +1,289 @@
+FUNCTION_BLOCK "FB_BagPulseDustCollector"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 1.0
+   VAR_INPUT
+      Enable : Bool := FALSE;                  // Master enable.
+      Reset : Bool := FALSE;                   // Reset sequence and request latch.
+      RunPermit : Bool := TRUE;                // Fan/run interlock for auto cleaning.
+      CleanRequest : Bool := FALSE;            // One-shot or maintained auto clean request.
+      DpHigh : Bool := FALSE;                  // Differential pressure high request.
+      DpLow : Bool := FALSE;                   // Differential pressure low release.
+      ContinuousMode : Bool := FALSE;          // Repeat cycles with CyclePause.
+      BagCount : Int := 4;                     // Default 4 bags, valid range 1..16.
+      PulseTime : Time := T#200MS;             // Default pulse valve ON time.
+      ValveInterval : Time := T#5S;            // Default delay between pulse valves.
+      CyclePause : Time := T#30M;              // Default pause between continuous cycles.
+      ManualPulse : Bool := FALSE;             // Rising edge starts one manual pulse.
+      ManualBag : Int := 1;                    // Manual bag number, valid range 1..BagCount.
+      UseBagEnable : Bool := FALSE;            // FALSE: bags 1..BagCount are enabled.
+      BagEnable : Array[1..16] of Bool;        // Used only when UseBagEnable = TRUE.
+      UseIndividualPulseTime : Bool := FALSE;  // FALSE: all bags use PulseTime.
+      BagPulseTime : Array[1..16] of Time;     // Optional per-bag pulse time.
+   END_VAR
+
+   VAR_OUTPUT
+      PulseValve : Array[1..16] of Bool;       // Pulse valve outputs.
+      Running : Bool;                          // TRUE while a sequence/manual pulse is active.
+      AutoRunning : Bool;                      // TRUE while auto cycle is active.
+      CurrentBag : Int;                        // Current bag number.
+      CycleDone : Bool;                        // One-scan pulse when a full cycle completes.
+      Busy : Bool;                             // TRUE when a request is being handled.
+      Alarm : Bool;                            // TRUE when parameters are outside safe range.
+      AlarmCode : Int;                         // 0 ok, 1 bag count clamped, 2 time defaulted, 3 no enabled bag, 4 manual bag invalid.
+      StepNo : Int;                            // 0 idle, 5 find bag, 10 pulse, 20 interval, 30 pause, 40 manual.
+   END_VAR
+
+   VAR
+      Step : Int := 0;
+      BagIndex : Int := 1;
+      ManualBagLatched : Int := 1;
+      AutoRequestLatched : Bool := FALSE;
+      ManualPulseOld : Bool := FALSE;
+      PulseTimer : TON;
+      IntervalTimer : TON;
+      PauseTimer : TON;
+   END_VAR
+
+   VAR_TEMP
+      i : Int;
+      SafeBagCount : Int;
+      EnabledCount : Int;
+      PulsePT : Time;
+      IntervalPT : Time;
+      PausePT : Time;
+      ActivePulsePT : Time;
+      ManualEdge : Bool;
+      FoundBag : Bool;
+      TimeWasDefaulted : Bool;
+      BagCountWasClamped : Bool;
+      ManualBagValid : Bool;
+      ManualBagEnabled : Bool;
+   END_VAR
+
+BEGIN
+   // Default outputs.
+   FOR #i := 1 TO 16 DO
+      #PulseValve[#i] := FALSE;
+   END_FOR;
+
+   #CycleDone := FALSE;
+   #Alarm := FALSE;
+   #AlarmCode := 0;
+   #BagCountWasClamped := FALSE;
+   #TimeWasDefaulted := FALSE;
+
+   // Clamp bag count.
+   #SafeBagCount := #BagCount;
+   IF #SafeBagCount < 1 THEN
+      #SafeBagCount := 1;
+      #BagCountWasClamped := TRUE;
+   ELSIF #SafeBagCount > 16 THEN
+      #SafeBagCount := 16;
+      #BagCountWasClamped := TRUE;
+   END_IF;
+
+   // Safe time defaults.
+   #PulsePT := #PulseTime;
+   IF #PulsePT <= T#0MS THEN
+      #PulsePT := T#200MS;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   #IntervalPT := #ValveInterval;
+   IF #IntervalPT <= T#0MS THEN
+      #IntervalPT := T#5S;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   #PausePT := #CyclePause;
+   IF #PausePT <= T#0MS THEN
+      #PausePT := T#30M;
+      #TimeWasDefaulted := TRUE;
+   END_IF;
+
+   // Count enabled bags. If UseBagEnable = FALSE, bags 1..BagCount are enabled.
+   #EnabledCount := 0;
+   FOR #i := 1 TO #SafeBagCount DO
+      IF (NOT #UseBagEnable) OR #BagEnable[#i] THEN
+         #EnabledCount := #EnabledCount + 1;
+      END_IF;
+   END_FOR;
+
+   // Request latches.
+   #ManualEdge := #ManualPulse AND NOT #ManualPulseOld;
+   #ManualPulseOld := #ManualPulse;
+
+   IF #CleanRequest OR #DpHigh OR #ContinuousMode THEN
+      #AutoRequestLatched := TRUE;
+   END_IF;
+
+   IF #DpLow AND NOT #CleanRequest AND NOT #DpHigh AND NOT #ContinuousMode THEN
+      #AutoRequestLatched := FALSE;
+   END_IF;
+
+   IF (NOT #Enable) OR #Reset THEN
+      #Step := 0;
+      #BagIndex := 1;
+      #ManualBagLatched := 1;
+      #AutoRequestLatched := FALSE;
+   END_IF;
+
+   // Pick the active pulse time.
+   #ActivePulsePT := #PulsePT;
+   IF (#Step = 10) AND #UseIndividualPulseTime THEN
+      IF (#BagIndex >= 1) AND (#BagIndex <= 16) THEN
+         IF #BagPulseTime[#BagIndex] > T#0MS THEN
+            #ActivePulsePT := #BagPulseTime[#BagIndex];
+         END_IF;
+      END_IF;
+   ELSIF (#Step = 40) AND #UseIndividualPulseTime THEN
+      IF (#ManualBagLatched >= 1) AND (#ManualBagLatched <= 16) THEN
+         IF #BagPulseTime[#ManualBagLatched] > T#0MS THEN
+            #ActivePulsePT := #BagPulseTime[#ManualBagLatched];
+         END_IF;
+      END_IF;
+   END_IF;
+
+   // IEC timers are called once every scan.
+   #PulseTimer(IN := ((#Step = 10) OR (#Step = 40)), PT := #ActivePulsePT);
+   #IntervalTimer(IN := (#Step = 20), PT := #IntervalPT);
+   #PauseTimer(IN := (#Step = 30), PT := #PausePT);
+
+   // Parameter alarms.
+   IF #BagCountWasClamped THEN
+      #Alarm := TRUE;
+      #AlarmCode := 1;
+   END_IF;
+
+   IF #TimeWasDefaulted THEN
+      #Alarm := TRUE;
+      #AlarmCode := 2;
+   END_IF;
+
+   IF #EnabledCount = 0 THEN
+      #Alarm := TRUE;
+      #AlarmCode := 3;
+   END_IF;
+
+   // Main sequence.
+   IF #Enable THEN
+      CASE #Step OF
+         0:
+            #ManualBagValid := (#ManualBag >= 1) AND (#ManualBag <= #SafeBagCount);
+            #ManualBagEnabled := #ManualBagValid AND ((NOT #UseBagEnable) OR #BagEnable[#ManualBag]);
+
+            IF #ManualEdge THEN
+               IF #ManualBagEnabled THEN
+                  #ManualBagLatched := #ManualBag;
+                  #Step := 40;
+               ELSE
+                  #Alarm := TRUE;
+                  #AlarmCode := 4;
+               END_IF;
+            ELSIF #RunPermit AND #AutoRequestLatched AND (#EnabledCount > 0) THEN
+               #BagIndex := 1;
+               #Step := 5;
+            END_IF;
+
+         5:
+            #FoundBag := FALSE;
+
+            FOR #i := #BagIndex TO #SafeBagCount DO
+               IF (NOT #UseBagEnable) OR #BagEnable[#i] THEN
+                  #BagIndex := #i;
+                  #FoundBag := TRUE;
+                  EXIT;
+               END_IF;
+            END_FOR;
+
+            IF #FoundBag THEN
+               #Step := 10;
+            ELSE
+               #CycleDone := TRUE;
+               #AutoRequestLatched := FALSE;
+
+               IF #RunPermit AND (#ContinuousMode OR (#DpHigh AND NOT #DpLow)) THEN
+                  #Step := 30;
+               ELSE
+                  #Step := 0;
+                  #BagIndex := 1;
+               END_IF;
+            END_IF;
+
+         10:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #PulseTimer.Q THEN
+               #BagIndex := #BagIndex + 1;
+
+               IF #BagIndex > #SafeBagCount THEN
+                  #CycleDone := TRUE;
+                  #AutoRequestLatched := FALSE;
+
+                  IF #ContinuousMode OR (#DpHigh AND NOT #DpLow) THEN
+                     #Step := 30;
+                  ELSE
+                     #Step := 0;
+                     #BagIndex := 1;
+                  END_IF;
+               ELSE
+                  #Step := 20;
+               END_IF;
+            END_IF;
+
+         20:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #IntervalTimer.Q THEN
+               #Step := 5;
+            END_IF;
+
+         30:
+            IF NOT #RunPermit THEN
+               #Step := 0;
+               #BagIndex := 1;
+               #AutoRequestLatched := FALSE;
+            ELSIF #PauseTimer.Q THEN
+               IF #ContinuousMode OR (#DpHigh AND NOT #DpLow) OR #CleanRequest THEN
+                  #BagIndex := 1;
+                  #Step := 5;
+               ELSE
+                  #Step := 0;
+                  #BagIndex := 1;
+               END_IF;
+            END_IF;
+
+         40:
+            IF #PulseTimer.Q THEN
+               #Step := 0;
+            END_IF;
+
+         ELSE
+            #Step := 0;
+            #BagIndex := 1;
+      END_CASE;
+   END_IF;
+
+   // Drive outputs after the state transition.
+   IF #Enable THEN
+      IF (#Step = 10) AND (#BagIndex >= 1) AND (#BagIndex <= #SafeBagCount) THEN
+         IF (NOT #UseBagEnable) OR #BagEnable[#BagIndex] THEN
+            #PulseValve[#BagIndex] := TRUE;
+         END_IF;
+      ELSIF (#Step = 40) AND (#ManualBagLatched >= 1) AND (#ManualBagLatched <= #SafeBagCount) THEN
+         IF (NOT #UseBagEnable) OR #BagEnable[#ManualBagLatched] THEN
+            #PulseValve[#ManualBagLatched] := TRUE;
+         END_IF;
+      END_IF;
+   END_IF;
+
+   #Running := (#Step <> 0);
+   #AutoRunning := (#Step = 5) OR (#Step = 10) OR (#Step = 20) OR (#Step = 30);
+   #Busy := #Running OR #AutoRequestLatched;
+   #CurrentBag := #BagIndex;
+   #StepNo := #Step;
+END_FUNCTION_BLOCK
