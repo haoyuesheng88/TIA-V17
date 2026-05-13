@@ -53,6 +53,7 @@ Keep the core behavior conservative:
 Read [references/default-io-map.md](./references/default-io-map.md) when the user does not provide an IO list and you need a ready-made closed loop.
 Read [references/tia-v17-shortcuts.md](./references/tia-v17-shortcuts.md) when the user asks for TIA Portal V17 shortcuts or when keyboard-driven UI navigation is faster than hunting through menus.
 Read [references/hmi-screen-popup-import.md](./references/hmi-screen-popup-import.md) when the user asks to create or verify TP1200/HMI screens, simple buttons, popup screens, or HMI XML import/export through Openness.
+Read [references/hmi-popup-sim-800x800.md](./references/hmi-popup-sim-800x800.md) when the user asks to continue the `HMI弹窗 [FB1]` / `DB_Components` / `DB_ActivePopup` popup simulation, create an 800x800 popup, bind internal Int HMI tags, add button `SetTag` actions, or verify the known-good `Codex_Popup_Sim_800x800_IO2` workflow.
 Read [references/hmi-advanced-objects.md](./references/hmi-advanced-objects.md) when the user asks about VB script import/export, HMI tag-table fixes for SmartTags, cycles, text lists, graphic lists, data records, alarm records, scheduled tasks, or the `记录` / `计划任务` / `周期` / `文本和图形列表` nodes.
 
 ## Safe Edit Policy For Main/OB1
@@ -125,6 +126,16 @@ Use XML import for simple generated HMI objects:
 - `assets/hmi-screen-templates/hmi_import_Codex_Popup_500x500.xml`: 500x500 popup screen
 
 After import, export the new HMI screen or popup to verify that the object exists and that key attributes such as `Width`, `Height`, and the button object name are present.
+
+For the verified `HMI弹窗 [FB1]` simulation, use these scripts in order:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\import-popup-sim-int-tagset.ps1" -OutputRoot ".\tia_popup_touch_sim"
+powershell -ExecutionPolicy Bypass -File ".\scripts\create-popup-sim-visual-screen.ps1" -OutputRoot ".\tia_popup_touch_sim" -ScreenName "Codex_Popup_Sim_800x800_IO2" -BindIntSet
+powershell -ExecutionPolicy Bypass -File ".\scripts\compile-current-hmi-target.ps1" -OutputRoot ".\tia_popup_touch_sim"
+```
+
+For TP1200, do not import an `800 x 800` object as a normal screen. Import it as `Hmi.Screen.ScreenPopup` through `ScreenPopupFolder.ScreenPopups`.
 
 ## HMI Advanced Object Pattern
 
