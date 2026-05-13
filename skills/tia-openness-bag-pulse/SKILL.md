@@ -1,11 +1,11 @@
 ---
 name: tia-openness-bag-pulse
-description: Connect to an open Siemens TIA Portal project through Openness, create or update bag pulse dust collector logic in SCL, add PLC tag tables, wire default input/output mappings, compile the PLC software, and save the project. Use when the user asks to connect to TIA Portal, Openness, Siemens Portal, STEP 7, or a live PLC project to build or import a bag pulse dust collector program, especially when they want closed-loop IO mapping, reusable block generation, or a repeatable import workflow.
+description: Connect to an open Siemens TIA Portal project through Openness, create or update bag pulse dust collector logic in SCL, add PLC tag tables, create simple TP1200/HMI screens or popup screens from XML templates, wire default input/output mappings, compile the PLC software, and save the project. Use when the user asks to connect to TIA Portal, Openness, Siemens Portal, STEP 7, TP1200, WinCC Comfort/Professional, HMI screens, popup screens, or a live PLC/HMI project to build or import a bag pulse dust collector program, create a simple HMI button, create a 500x500 popup, verify import/export, or perform a repeatable import workflow.
 ---
 
 # TIA Openness Bag Pulse
 
-Use this skill to turn a user request like "connect to TIA and build a bag pulse dust collector" into a repeatable Openness workflow.
+Use this skill to turn a user request like "connect to TIA and build a bag pulse dust collector" or "create a TP1200 button and a popup screen" into a repeatable Openness workflow.
 
 Assume the work happens on Windows with PowerShell, an already-open TIA Portal session, and a CPU that supports SCL blocks. Prefer creating new blocks and tag tables over mutating unrelated existing logic.
 
@@ -15,11 +15,12 @@ Assume the work happens on Windows with PowerShell, an already-open TIA Portal s
 2. Attach to the open TIA Portal process.
 3. Discover the target project, PLC software object, existing blocks, and existing tag tables.
 4. Generate or update the SCL source files in the current workspace.
-5. Import the source into TIA with Openness, creating blocks and DBs.
+5. Import the source into TIA with Openness, creating blocks, DBs, HMI screens, or HMI popup screens.
 6. Create or update the PLC tag table for field IO and status words.
-7. Compile the generated blocks, then compile the PLC software.
-8. Save the project.
-9. Report what was created, what addresses were used, and whether OB1/Main was changed.
+7. Compile the generated PLC blocks when PLC logic changed.
+8. Export generated HMI objects or PLC blocks for verification.
+9. Save the project.
+10. Report what was created, what addresses were used, and whether OB1/Main or HMI screens were changed.
 
 ## Quick Rules
 
@@ -51,6 +52,7 @@ Keep the core behavior conservative:
 
 Read [references/default-io-map.md](./references/default-io-map.md) when the user does not provide an IO list and you need a ready-made closed loop.
 Read [references/tia-v17-shortcuts.md](./references/tia-v17-shortcuts.md) when the user asks for TIA Portal V17 shortcuts or when keyboard-driven UI navigation is faster than hunting through menus.
+Read [references/hmi-screen-popup-import.md](./references/hmi-screen-popup-import.md) when the user asks to create or verify TP1200/HMI screens, simple buttons, popup screens, or HMI XML import/export through Openness.
 
 ## Safe Edit Policy For Main/OB1
 
@@ -111,6 +113,17 @@ Create a dedicated PLC tag table, for example `BagPulseDustCollector_IO`, and ke
 Use the default map from [references/default-io-map.md](./references/default-io-map.md) unless the user supplies a plant-specific address list.
 
 If the target project already uses those addresses, stop and ask for the actual IO allocation instead of guessing.
+
+## HMI Screen Pattern
+
+For TP1200 or HMI requests, find `Siemens.Engineering.Hmi.HmiTarget` through the HMI device item's `SoftwareContainer`. Use `ScreenFolder.Screens` for normal screens and `ScreenPopupFolder.ScreenPopups` for popup screens.
+
+Use XML import for simple generated HMI objects:
+
+- `assets/hmi-screen-templates/hmi_import_Codex_Button_Test.xml`: normal screen with one button
+- `assets/hmi-screen-templates/hmi_import_Codex_Popup_500x500.xml`: 500x500 popup screen
+
+After import, export the new HMI screen or popup to verify that the object exists and that key attributes such as `Width`, `Height`, and the button object name are present.
 
 ## Validation
 
