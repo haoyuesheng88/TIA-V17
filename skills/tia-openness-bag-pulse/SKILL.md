@@ -50,6 +50,7 @@ Keep the core behavior conservative:
 - Support enabled-bag selection and optional per-bag pulse time
 
 Read [references/default-io-map.md](./references/default-io-map.md) when the user does not provide an IO list and you need a ready-made closed loop.
+Read [references/tia-v17-shortcuts.md](./references/tia-v17-shortcuts.md) when the user asks for TIA Portal V17 shortcuts or when keyboard-driven UI navigation is faster than hunting through menus.
 
 ## Safe Edit Policy For Main/OB1
 
