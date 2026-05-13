@@ -1,4 +1,4 @@
 interface:
   display_name: "TIA Bag Pulse"
-  short_description: "Import PLC logic and TP1200 HMI screens into TIA Portal through Openness."
-  default_prompt: "Use $tia-openness-bag-pulse to connect to the open TIA Portal project, create bag pulse dust collector blocks or TP1200 HMI screens, and verify import/export."
+  short_description: "Import PLC logic and TP1200 HMI objects into TIA Portal through Openness."
+  default_prompt: "Use $tia-openness-bag-pulse to connect to the open TIA Portal project, create PLC logic or TP1200 HMI objects such as screens, VB scripts, cycles, text lists, graphic lists, and tags, then verify import/export and compile."
