@@ -1,11 +1,11 @@
 ---
 name: tia-openness-bag-pulse
-description: Connect to an open Siemens TIA Portal project through Openness, create or update bag pulse dust collector logic in SCL, add PLC tag tables, create simple TP1200/HMI screens or popup screens from XML templates, wire default input/output mappings, compile the PLC software, and save the project. Use when the user asks to connect to TIA Portal, Openness, Siemens Portal, STEP 7, TP1200, WinCC Comfort/Professional, HMI screens, popup screens, or a live PLC/HMI project to build or import a bag pulse dust collector program, create a simple HMI button, create a 500x500 popup, verify import/export, or perform a repeatable import workflow.
+description: Connect to an open Siemens TIA Portal project through Openness, create or update bag pulse dust collector logic in SCL, add PLC/HMI tag tables, create simple TP1200/HMI screens or popup screens from XML templates, import/export HMI VB scripts, cycles, text lists, graphic lists, and HMI tags, wire default input/output mappings, compile PLC/HMI software, and save the project. Use when the user asks to connect to TIA Portal, Openness, Siemens Portal, STEP 7, TP1200, WinCC Comfort/Professional, HMI screens, popup screens, VB scripts, data records, alarm records, scheduled tasks, cycles, text and graphic lists, or a live PLC/HMI project to build, import, export, verify, or package repeatable workflows.
 ---
 
 # TIA Openness Bag Pulse
 
-Use this skill to turn a user request like "connect to TIA and build a bag pulse dust collector" or "create a TP1200 button and a popup screen" into a repeatable Openness workflow.
+Use this skill to turn a user request like "connect to TIA and build a bag pulse dust collector", "create a TP1200 button and a popup screen", or "verify HMI VB script/cycle/text-list import and export" into a repeatable Openness workflow.
 
 Assume the work happens on Windows with PowerShell, an already-open TIA Portal session, and a CPU that supports SCL blocks. Prefer creating new blocks and tag tables over mutating unrelated existing logic.
 
@@ -15,7 +15,7 @@ Assume the work happens on Windows with PowerShell, an already-open TIA Portal s
 2. Attach to the open TIA Portal process.
 3. Discover the target project, PLC software object, existing blocks, and existing tag tables.
 4. Generate or update the SCL source files in the current workspace.
-5. Import the source into TIA with Openness, creating blocks, DBs, HMI screens, or HMI popup screens.
+5. Import the source into TIA with Openness, creating blocks, DBs, HMI screens, HMI popup screens, VB scripts, cycles, text lists, graphic lists, or HMI tag tables.
 6. Create or update the PLC tag table for field IO and status words.
 7. Compile the generated PLC blocks when PLC logic changed.
 8. Export generated HMI objects or PLC blocks for verification.
@@ -53,6 +53,7 @@ Keep the core behavior conservative:
 Read [references/default-io-map.md](./references/default-io-map.md) when the user does not provide an IO list and you need a ready-made closed loop.
 Read [references/tia-v17-shortcuts.md](./references/tia-v17-shortcuts.md) when the user asks for TIA Portal V17 shortcuts or when keyboard-driven UI navigation is faster than hunting through menus.
 Read [references/hmi-screen-popup-import.md](./references/hmi-screen-popup-import.md) when the user asks to create or verify TP1200/HMI screens, simple buttons, popup screens, or HMI XML import/export through Openness.
+Read [references/hmi-advanced-objects.md](./references/hmi-advanced-objects.md) when the user asks about VB script import/export, HMI tag-table fixes for SmartTags, cycles, text lists, graphic lists, data records, alarm records, scheduled tasks, or the `记录` / `计划任务` / `周期` / `文本和图形列表` nodes.
 
 ## Safe Edit Policy For Main/OB1
 
@@ -125,6 +126,16 @@ Use XML import for simple generated HMI objects:
 
 After import, export the new HMI screen or popup to verify that the object exists and that key attributes such as `Width`, `Height`, and the button object name are present.
 
+## HMI Advanced Object Pattern
+
+For HMI VB scripts, cycles, text lists, graphic lists, and internal tag tables, use the bundled templates under `assets/hmi-advanced-templates` and the repeatable validation script:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\invoke-hmi-advanced-loop.ps1"
+```
+
+In V17 TP1200 Comfort testing, Openness exposed `Cycles`, `TextLists`, `GraphicLists`, `TagFolder`, and `VBScriptFolder`, but did not expose direct collections for data records, alarm records, or scheduled tasks. For those nodes, document the boundary clearly and use GUI/manual XML samples if the user needs direct edits.
+
 ## Validation
 
 After generation:
@@ -134,7 +145,8 @@ After generation:
 3. Compile `DB_BagPulseDustCollector_IO`
 4. Compile `FC_BagPulseDustCollector_IO`
 5. Compile the whole PLC software object
-6. Save the project
+6. Compile the HMI target when HMI objects changed
+7. Save the project
 
 In the final report, include:
 
@@ -144,6 +156,7 @@ In the final report, include:
 - tag table created or updated
 - whether `Main`/`OB1` changed
 - compile result summary
+- HMI compile result summary when HMI objects changed
 - any assumptions, especially IO addresses
 
 ## What To Avoid
