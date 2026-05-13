@@ -1,4 +1,4 @@
 interface:
   display_name: "TIA Bag Pulse"
-  short_description: "Import bag pulse dust collector logic into TIA Portal through Openness."
-  default_prompt: "Use $tia-openness-bag-pulse to connect to the open TIA Portal project, create bag pulse dust collector blocks, and close the IO loop."
+  short_description: "Import PLC logic and TP1200 HMI screens into TIA Portal through Openness."
+  default_prompt: "Use $tia-openness-bag-pulse to connect to the open TIA Portal project, create bag pulse dust collector blocks or TP1200 HMI screens, and verify import/export."
